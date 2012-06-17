@@ -159,6 +159,12 @@ public class FMRadio extends Activity {
     /* Indicator of frequency */
     private FreqIndicator mFreqIndicator;
 
+    /* Volume before SW audio muting */
+    private int mMutedVol;
+    private boolean mMuted = false;
+
+    private boolean mPresetFrequency = false;
+
     private class SeekBarChangeListener implements SeekBar.OnSeekBarChangeListener{
         private int lowerLimit = 0;
 
@@ -172,7 +178,14 @@ public class FMRadio extends Activity {
             int frequency = lowerLimit + ((progress / stepSize ) * stepSize);
             // Change frequency only if its different from current.
             if (mTunedStation.getFrequency() != frequency) {
-                tuneRadio(frequency);
+                if (mPresetFrequency) {
+                    muteFMAudioStream(500);
+                    tuneRadio(frequency);
+                    unMuteFMAudioStream();
+                    mPresetFrequency = false;
+                } else {
+                    tuneRadio(frequency);
+                }
             }
         }
 
@@ -223,6 +236,8 @@ public class FMRadio extends Activity {
     private static boolean mIsSeeking = false;
 
     private static boolean mIsSearching = false;
+
+    private static boolean mIsTuning = false;
 
     private static int mScanPty = 0;
 
@@ -293,8 +308,8 @@ public class FMRadio extends Activity {
         mSeekUpButton.setImageResource(R.drawable.btn_arrow_right);
         mSeekDownButton.setImageResource(R.drawable.btn_arrow_left);
         if (!context.getResources().getBoolean(R.bool.seek_supported)){
-             mSeekUpButton.setVisibility(View.INVISIBLE);
-	     mSeekDownButton.setVisibility(View.INVISIBLE);
+            mSeekUpButton.setVisibility(View.INVISIBLE);
+            mSeekDownButton.setVisibility(View.INVISIBLE);
         }
         mSpeakerButton = (ImageButton) findViewById(R.id.btn_speaker);
         mSpeakerButton.setOnClickListener(mSpeakerSwitchClickListener);
@@ -437,13 +452,11 @@ public class FMRadio extends Activity {
 
     private void switchToSpeaker() {
         AudioSystem.setForceUse(AudioSystem.FOR_MEDIA, AudioSystem.FORCE_SPEAKER);
-        AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_FM, AudioSystem.DEVICE_STATE_UNAVAILABLE, "");
         AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_FM, AudioSystem.DEVICE_STATE_AVAILABLE, "");
     }
 
     private void switchToHeadset() {
         AudioSystem.setForceUse(AudioSystem.FOR_MEDIA, AudioSystem.FORCE_NONE);
-        AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_FM, AudioSystem.DEVICE_STATE_UNAVAILABLE, "");
         AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_FM, AudioSystem.DEVICE_STATE_AVAILABLE, "");
     }
 
@@ -751,6 +764,7 @@ public class FMRadio extends Activity {
             if (station != null) {
                 Log.d(LOGTAG, "station - " + station.getName() + " (" + station.getFrequency()
                         + ")");
+                mPresetFrequency = true;
                 mFreqIndicator.setFrequency(station.getFrequency());
             } else {
                 addToPresets();
@@ -795,11 +809,11 @@ public class FMRadio extends Activity {
                 disableRadio();
             }
             else {
-		if (context.getResources().getBoolean(R.bool.require_bt)) {
-		    asyncCheckAndEnableRadio();
-		} else {
-		    enableRadio();
-		}
+                if (context.getResources().getBoolean(R.bool.require_bt)) {
+                    asyncCheckAndEnableRadio();
+                } else {
+                    enableRadio();
+                }
             }
             setTurnOnOffButtonImage();
         }
@@ -807,13 +821,13 @@ public class FMRadio extends Activity {
 
     private View.OnClickListener mSeekUpClickListener = new View.OnClickListener() {
         public void onClick(View v) {
-	    SeekNextStation();
+            SeekNextStation();
         }
     };
 
     private View.OnClickListener mSeekDownClickListener = new View.OnClickListener() {
         public void onClick(View v) {
-	    SeekPreviousStation();
+            SeekPreviousStation();
         }
     };
 
@@ -830,7 +844,7 @@ public class FMRadio extends Activity {
         if (isFmOn() == true) {
             mOnOffButton.setImageResource(R.drawable.button_power_on);
         } else {
-            /* Find a icon to indicate off */
+            // Find a icon to indicate off
             mOnOffButton.setImageResource(R.drawable.button_power_off);
         }
     }
@@ -903,41 +917,53 @@ public class FMRadio extends Activity {
         mIsSearching = false;
         boolean bStatus = false;
 
+        mMutedVol = -1;
+
+        // Check if our service stub is valid
         if (mService != null) {
             try {
+                mService.mute();
 
-                boolean radioOn = mService.isFmOn();
+                AudioSystem.setForceUse(AudioSystem.FOR_MEDIA, AudioSystem.FORCE_NONE);
+                AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_FM, AudioSystem.DEVICE_STATE_UNAVAILABLE, "");
 
-                // reset volume to avoid a bug that volume will be MAX
+               // reset volume to avoid a bug that volume will be MAX
                 int vol = AudioSystem.getStreamVolumeIndex(AudioSystem.STREAM_FM);
                 AudioSystem.setStreamVolumeIndex(AudioSystem.STREAM_FM, vol);
 
                 if (!isPhoneInCall()) {
-                    mService.unMute();
                     bStatus = mService.fmOn();
                 }
 
                 if (bStatus) {
                     if (isAntennaAvailable()) {
                         mFreqIndicator.setFrequency(FmSharedPreferences.getTunedFrequency());
+
+                        boolean radioOn = mService.isFmOn();
+
                         if (!radioOn) {
                             // Set the previously tuned frequency
                             tuneRadio(FmSharedPreferences.getTunedFrequency());
-
-                            // The output device is not set on a FM radio power on so we do it here
-                            if(FmSharedPreferences.getSpeaker()) {
-                                switchToSpeaker();
-                            }
-                            else {
-                                switchToHeadset();
-                            }
                         }
+
+                        // Get the audio focus and unmute the FM radio
+                        mService.fmGetAudioFocus();
+                        mService.unMute();
+
                         // Update the speaker icon
                         setSpeakerUI(FmSharedPreferences.getSpeaker());
 
                         // Turn on the FM radio
                         enableRadioOnOffUI();
-                    }
+
+                        // The output device is not set on a FM radio power on so we do it here
+                        if(FmSharedPreferences.getSpeaker()) {
+                            switchToSpeaker();
+                        }
+                        else {
+                            switchToHeadset();
+                        }
+                   }
                     else {
                         Toast toast =Toast.makeText(this,
                                 getString(R.string.need_headset_for_antenna),
@@ -985,13 +1011,13 @@ public class FMRadio extends Activity {
                     // showDialog(DIALOG_CMD_FAILED);
                 }
                 else {
-                    /* shut down force use */
+                    // shut down force use
                     AudioSystem.setForceUse(AudioSystem.FOR_MEDIA, AudioSystem.FORCE_NONE);
                 }
 
                 // Toggle BT on/off depending on value in preferences
-		if (context.getResources().getBoolean(R.bool.require_bt))
-		    toggleRadioOffBluetoothBehaviour();
+                if (context.getResources().getBoolean(R.bool.require_bt))
+                    toggleRadioOffBluetoothBehaviour();
             }
             catch (RemoteException e) {
                 Log.e(LOGTAG, "RemoteException in disableRadio", e);
@@ -1112,7 +1138,7 @@ public class FMRadio extends Activity {
     private void enableRadioOnOffUI() {
         boolean bEnable = isFmOn();
 
-        /* Disable if no antenna/headset is available */
+        // Disable if no antenna/headset is available
         if (!isAntennaAvailable()) {
             bEnable = false;
         }
@@ -1132,46 +1158,52 @@ public class FMRadio extends Activity {
         mSpeakerButton.setEnabled(bEnable);
         mFreqIndicator.setEnabled(bEnable);
         mTunerView.setEnabled(bEnable);
-	mSeekUpButton.setEnabled(bEnable);
-	mSeekDownButton.setEnabled(bEnable);
+        mSeekUpButton.setEnabled(bEnable);
+        mSeekDownButton.setEnabled(bEnable);
     }
 
     private void updateSearchProgress() {
-	if (mService != null) {
-	    try{
-		int freq = mService.getFreq();
+        if (mService != null) {
+            try{
+                // initialize the frequency control variables
+                int freq = mService.getFreq();
 
-		// loop for up to 4 seconds waiting for search to find a station
-		for(int i=0; i < 8 && mIsSeeking; i++){
-		    int freqb;
-		    if(freq != (freqb = mService.getFreq())){
-			// if frequencies don't match wait 500ms then try again
-			freq = freqb;
-			Thread.sleep(500);
-		    }
-		    else {
-			// if frequencies do match seeking is finished
-			mIsSeeking = false;
-		    }
-		}
+                // loop for up to 4 seconds waiting for search to find a station
+                for(int i=0; i < 8 && mIsSeeking; i++){
+                    // get the currently tuned frequency
+                    int freqb = mService.getFreq();
 
-		if(mIsSeeking)
-		    // if the loop completed without stopping on a station cancel the search
-		    cancelSearch();
-		else {
-		    // if a station was found update the display with the new frequency
-		    Log.d(LOGTAG,"Tuned frequency="+freq);
-		    mFreqIndicator.setFrequency(freq);
-		    mTunedStation.setFrequency(freq);
-		}
-	    }
-	    catch (RemoteException e)	{
-		e.printStackTrace();
-	    }
-	    catch (InterruptedException e)	{
-		e.printStackTrace();
-	    }
-	}
+                    // check if frequency is changed from the last cycle
+                    if (freqb != freq){
+                        // save current frequency
+                        freq = freqb;
+                        // if frequencies don't match wait 200ms then try again
+                        Thread.sleep(200);
+                    }
+                    else {
+                        // if frequencies do match seeking is finished
+                        mIsSeeking = false;
+                    }
+                }
+
+                if(mIsSeeking) {
+                    // if the loop completed without stopping on a station cancel the search
+                    cancelSearch();
+                }
+                else {
+                    // if a station was found update the display with the new frequency
+                    Log.d(LOGTAG,"Tuned frequency="+freq);
+                    mFreqIndicator.setFrequency(freq);
+                    mTunedStation.setFrequency(freq);
+                }
+            }
+            catch (RemoteException e) {
+                e.printStackTrace();
+            }
+            catch (InterruptedException e)  {
+                e.printStackTrace();
+            }
+        }
     }
 
     private void setupPresetLayout() {
@@ -1205,7 +1237,6 @@ public class FMRadio extends Activity {
                 }
             }
         }
-
     }
 
     private void updateStationInfoToUI() {
@@ -1264,10 +1295,39 @@ public class FMRadio extends Activity {
         return mTunedStation;
     }
 
+    private void muteFMAudioStream() {
+        if (!mMuted) {
+            AudioManager audioManager = (AudioManager)getSystemService("audio");
+            mMutedVol = audioManager.getStreamVolume(AudioSystem.STREAM_FM);
+            audioManager.setStreamVolume(AudioSystem.STREAM_FM, 0, 0);
+            mMuted = true;
+        }
+    }
+
+    private void muteFMAudioStream(int waitTime) {
+        muteFMAudioStream();
+        try{
+            Thread.sleep(waitTime);
+        }
+        catch (InterruptedException e)  {
+            e.printStackTrace();
+        }
+    }
+
+    private void unMuteFMAudioStream() {
+        if (mMuted) {
+            AudioManager audioManager = (AudioManager)getSystemService("audio");
+            audioManager.setStreamVolume(AudioSystem.STREAM_FM, mMutedVol, 0);
+            mMuted = false;
+        }
+    }
+
     private void SeekPreviousStation() {
         Log.d(LOGTAG, "SeekPreviousStation");
+        muteFMAudioStream();
         if (mService != null) {
             try {
+                mService.mute();
                 if (!isSeekActive()) {
                     mIsSeeking = mService.seek(false);
                     if (mIsSeeking == false) {
@@ -1275,20 +1335,23 @@ public class FMRadio extends Activity {
                         Log.e(LOGTAG, " mService.seek failed");
                         showDialog(DIALOG_CMD_FAILED);
                     }
-
                 }
+                resetFMStationInfoUI();
+                updateSearchProgress();
+                mService.unMute();
             } catch (RemoteException e) {
                 e.printStackTrace();
             }
         }
-        resetFMStationInfoUI();
-        updateSearchProgress();
+        unMuteFMAudioStream();
     }
 
     private void SeekNextStation() {
         Log.d(LOGTAG, "SeekNextStation");
+        muteFMAudioStream();
         if (mService != null) {
             try {
+                mService.mute();
                 if (!isSeekActive()) {
                     mIsSeeking = mService.seek(true);
                     if (mIsSeeking == false) {
@@ -1297,12 +1360,14 @@ public class FMRadio extends Activity {
                         showDialog(DIALOG_CMD_FAILED);
                     }
                 }
+                resetFMStationInfoUI();
+                updateSearchProgress();
+                mService.unMute();
             } catch (RemoteException e) {
                 e.printStackTrace();
             }
         }
-        resetFMStationInfoUI();
-        updateSearchProgress();
+        unMuteFMAudioStream();
     }
 
     /** Scan related */
@@ -1421,12 +1486,12 @@ public class FMRadio extends Activity {
         if (mSleepUpdateHandlerThread == null) {
             mSleepUpdateHandlerThread = new Thread(null, doSleepProcessing, "SleepUpdateThread");
         }
-        /* Launch he dummy thread to simulate the transfer progress */
+        // Launch he dummy thread to simulate the transfer progress
         Log.d(LOGTAG, "Thread State: " + mSleepUpdateHandlerThread.getState());
         if (mSleepUpdateHandlerThread.getState() == Thread.State.TERMINATED) {
             mSleepUpdateHandlerThread = new Thread(null, doSleepProcessing, "SleepUpdateThread");
         }
-        /* If the thread state is "new" then the thread has not yet started */
+        // If the thread state is "new" then the thread has not yet started
         if (mSleepUpdateHandlerThread.getState() == Thread.State.NEW) {
             mSleepUpdateHandlerThread.start();
         }
@@ -1538,6 +1603,7 @@ public class FMRadio extends Activity {
         if ((mService != null)) {
             boolean bStatus = false;
             try {
+                mIsTuning = true;
                 mTunedStation.setName("");
                 mTunedStation.setPI(0);
                 mTunedStation.setPty(0);
@@ -1546,6 +1612,15 @@ public class FMRadio extends Activity {
                 bStatus = mService.tune(frequency);
                 if (bStatus) {
                     mCommandActive = CMD_TUNE;
+                    // loop for up to 1 second waiting for radio tuning
+                    for(int i=0; i < 10 && mIsTuning; i++){
+                        try {
+                            // if the tuning isn't executed wait 100ms then try again
+                            Thread.sleep(100);
+                        } catch (Exception e) {
+                            Log.e(LOGTAG, "Exception in sleep()", e);
+                        }
+                    }
                 } else {
                     mCommandFailed = CMD_TUNE;
                     Log.e(LOGTAG, " mService.tune failed");
@@ -1569,18 +1644,18 @@ public class FMRadio extends Activity {
 
     final Runnable mRadioEnabled = new Runnable() {
         public void run() {
-            /* Update UI to FM On State */
+            // Update UI to FM On State
             enableRadioOnOffUI(true);
-            /* Tune to the last tuned frequency */
+            // Tune to the last tuned frequency
             mFreqIndicator.setFrequency(FmSharedPreferences.getTunedFrequency());
         }
     };
 
     final Runnable mRadioDisabled = new Runnable() {
         public void run() {
-            /* shut down force use */
+            // shut down force use
             AudioSystem.setForceUse(AudioSystem.FOR_MEDIA, AudioSystem.FORCE_NONE);
-            /* Update UI to FM Off State */
+            // Update UI to FM Off State
             enableRadioOnOffUI(false);
 
             if (mPrefs.getHeadsetDcBehaviour()) {
@@ -1597,8 +1672,10 @@ public class FMRadio extends Activity {
                 mTunedStation.Copy(station);
             }
 
+            muteFMAudioStream();
             updateSearchProgress();
             resetFMStationInfoUI();
+            unMuteFMAudioStream();
         }
     };
 
@@ -1609,8 +1686,10 @@ public class FMRadio extends Activity {
             mIsScaning = false;
             mIsSeeking = false;
             mIsSearching = false;
+            muteFMAudioStream();
             updateSearchProgress();
             resetFMStationInfoUI();
+            unMuteFMAudioStream();
         }
     };
 
@@ -1619,12 +1698,12 @@ public class FMRadio extends Activity {
             Log.d(LOGTAG, "mSearchListComplete: ");
             mIsSearching = false;
 
-            /* Now get the list */
+            // Now get the list
             if (mService != null) {
                 try {
                     int[] searchList = mService.getSearchList();
                     if (searchList != null) {
-                        /* Add the stations into the preset list */
+                        // Add the stations into the preset list
                         int currentList = FmSharedPreferences.getCurrentListIndex();
                         for (int station = 0; (station < searchList.length)
                                 && (station < NUM_AUTO_PRESETS_SEARCH); station++) {
@@ -1645,9 +1724,11 @@ public class FMRadio extends Activity {
                     e.printStackTrace();
                 }
             }
+            muteFMAudioStream();
             updateSearchProgress();
             resetFMStationInfoUI();
             setupPresetLayout();
+            unMuteFMAudioStream();
         }
     };
 
@@ -1662,9 +1743,9 @@ public class FMRadio extends Activity {
             String str = "";
             if (mService != null) {
                 try {
-                    /* Get PTY and PI and update the display */
+                    // Get PTY and PI and update the display
                     int tempInt = mService.getProgramType();
-                    /* Save PTY */
+                    // Save PTY
                     mTunedStation.setPty(tempInt);
                     tempInt = mService.getProgramID();
                     if (tempInt != 0) {
@@ -1683,13 +1764,13 @@ public class FMRadio extends Activity {
             String str = "";
             if (mService != null) {
                 try {
-                    /* Get PTY and PI and update the display */
+                    // Get PTY and PI and update the display
                     int tempInt = mService.getProgramType();
-                    /* Save PTY */
+                    // Save PTY
                     mTunedStation.setPty(tempInt);
 
                     tempInt = mService.getProgramID();
-                    /* Save the program ID */
+                    // Save the program ID
                     if (tempInt != 0) {
                         mTunedStation.setPI(tempInt);
                     }
@@ -1900,11 +1981,11 @@ public class FMRadio extends Activity {
                 try {
                     mService.registerCallbacks(mServiceCallbacks);
 
-		    if (context.getResources().getBoolean(R.bool.require_bt)) {
-			asyncCheckAndEnableRadio();
-		    } else {
-			enableRadio();
-		    }
+                   if (context.getResources().getBoolean(R.bool.require_bt)) {
+                       asyncCheckAndEnableRadio();
+               } else {
+                 enableRadio();
+               }
 
                 } catch (RemoteException e) {
                     e.printStackTrace();
@@ -1940,6 +2021,7 @@ public class FMRadio extends Activity {
         public void onTuneStatusChanged() {
             Log.d(LOGTAG, "mServiceCallbacks.onTuneStatusChanged :");
             mHandler.post(mUpdateStationInfo);
+            mIsTuning = false;
         }
 
         public void onProgramServiceChanged() {
