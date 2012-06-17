@@ -7,6 +7,7 @@ interface IFMRadioService
     boolean fmOn();
     boolean fmOff();
     boolean isFmOn();
+    void fmGetAudioFocus();
     boolean fmReconfigure();
     void registerCallbacks(IFMRadioServiceCallbacks cb);
     void unregisterCallbacks();
@@ -33,4 +34,3 @@ interface IFMRadioService
     boolean isAntennaAvailable();
     boolean isWiredHeadsetAvailable();
 }
-
