@@ -74,7 +74,7 @@ public class FMRadioService extends Service {
     /**
      * App name used in log messages
      */
-    private static final String LOGTAG = "FMService";
+    private static final String LOGTAG = "FMRadioService";
 
     private AudioManager mAudioManager;
 
@@ -501,7 +501,7 @@ public class FMRadioService extends Service {
         mServiceInUse = false;
         Log.d(LOGTAG, "onUnbind");
 
-        /* Application/UI is not attached, so go into lower power mode */
+        // Application/UI is not attached, so go into lower power mode
         unregisterCallbacks();
         setLowPowerMode(true);
         if (isFmOn()) {
@@ -679,6 +679,10 @@ public class FMRadioService extends Service {
             return (mService.get().isFmOn());
         }
 
+        public void fmGetAudioFocus() throws RemoteException {
+            mService.get().fmGetAudioFocus();
+        }
+
         public boolean fmReconfigure() {
             return (mService.get().fmReconfigure());
         }
@@ -815,12 +819,10 @@ public class FMRadioService extends Service {
 
         if (mReceiver != null) {
             if (isFmOn()) {
-                /* FM Is already on, */
+                // FM Is already on
                 bStatus = true;
                 Log.d(LOGTAG, "mReceiver.already enabled");
             } else {
-                mAudioManager.requestAudioFocus(mAudioFocusListener, AudioManager.STREAM_MUSIC,
-                        AudioManager.AUDIOFOCUS_GAIN);
                 setMediaButtonReceiver(true);
                 mMuted = false;
                 // This sets up the FM radio device
@@ -836,26 +838,27 @@ public class FMRadioService extends Service {
             }
 
             if (bStatus == true) {
-                startFM();
                 bStatus = mReceiver.registerRdsGroupProcessing(FmReceiver.FM_RX_RDS_GRP_RT_EBL
                         | FmReceiver.FM_RX_RDS_GRP_PS_EBL | FmReceiver.FM_RX_RDS_GRP_AF_EBL
                         | FmReceiver.FM_RX_RDS_GRP_PS_SIMPLE_EBL);
                 Log.d(LOGTAG, "registerRdsGroupProcessing done, Status :" + bStatus);
                 bStatus = enableAutoAF(FmSharedPreferences.getAutoAFSwitch());
                 Log.d(LOGTAG, "enableAutoAF done, Status :" + bStatus);
-                /* Put the hardware into normal mode */
+                // Put the hardware into normal mode
                 bStatus = setLowPowerMode(false);
                 Log.d(LOGTAG, "setLowPowerMode done, Status :" + bStatus);
 
-                /* There is no internal Antenna */
+                // There is no internal Antenna
                 bStatus = mReceiver.setInternalAntenna(false);
                 Log.d(LOGTAG, "setInternalAntenna done, Status :" + bStatus);
 
-                /* Read back to verify the internal Antenna mode */
+                // Read back to verify the internal Antenna mode
                 readInternalAntennaAvailable();
 
                 mFMOn = true;
                 bStatus = true;
+
+                updateNotification();
             } else {
                 stop();
             }
@@ -893,7 +896,18 @@ public class FMRadioService extends Service {
         return mFMOn;
     }
 
+
     /*
+     * Gets the audio focus initializing the audio driver.
+     */
+    public void fmGetAudioFocus()
+    {
+        mAudioManager.requestAudioFocus(mAudioFocusListener, AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN);
+    }
+
+
+   /*
      * ReConfigure the FM Setup parameters - Band - Channel Spacing (50/100/200
      * KHz) - Emphasis (50/75) - Frequency limits - RDS/RBDS standard
      * @return true if configure api was invoked successfully, false if the api
@@ -1012,7 +1026,7 @@ public class FMRadioService extends Service {
      * @return freq value currently tuned
      */
     public int getFreq() {
-	return mReceiver.getTunedFrequency();
+	      return mReceiver.getTunedFrequency();
     }
 
    /**
