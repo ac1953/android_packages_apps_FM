@@ -939,11 +939,11 @@ public class FMRadio extends Activity {
                     if (isAntennaAvailable()) {
                         mFreqIndicator.setFrequency(FmSharedPreferences.getTunedFrequency());
 
-                        boolean radioOn = mService.isFmOn();
-
-                        if (!radioOn) {
-                            // Set the previously tuned frequency
+                        if (FmSharedPreferences.getTunedFrequency() != mService.getFreq()) {
+                            // Ensure the previously tuned frequency is set
+                            muteFMAudioStream(500);
                             tuneRadio(FmSharedPreferences.getTunedFrequency());
+                            unMuteFMAudioStream();
                         }
 
                         // Get the audio focus and unmute the FM radio
